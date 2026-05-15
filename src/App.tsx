@@ -27,7 +27,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 // ==========================================
 // 1. 구글 시트 웹 앱 URL (사용자가 여기에 주소 입력)
 // ==========================================
-const SCRIPT_URL = '여기에_구글_스크립트_URL을_넣으세요';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxlJNMIxU7uhiLUZ7siXiWmImBNKZdwCt4fZmWk9viDaosMg1Bhhk06xWXa5r35MYI7/exec';
 
 // Gemini API 설정 (Vite/React 패턴)
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
@@ -62,16 +62,41 @@ export default function App() {
   const processImage = async (file: File) => {
     setView('processing');
     setError(null);
-    try {
-      const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve) => {
-        reader.onload = () => resolve((reader.result as string).split(',')[1]);
-      });
-      reader.readAsDataURL(file);
-      const base64 = await base64Promise;
+    setLoadingMsg('사진을 분석하고 있습니다...');
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+    let checkInterval = setInterval(() => {
+      setLoadingMsg(prev => 
+        prev === '사진을 분석하고 있습니다...' ? '거의 다 텍스트를 추출했습니다...' : 
+        prev === '거의 다 텍스트를 추출했습니다...' ? '데이터를 꼼꼼히 확인 중입니다...' : 
+        '사진을 분석하고 있습니다...'
+      );
+    }, 4000);
+
+    try {
+      // FileReader를 통해 Base64 변환 시도 (캔버스 변환 생략으로 가장 안전한 방법)
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(',')[1]);
+        reader.onerror = () => reject(new Error("파일을 읽을 수 없습니다."));
+        reader.readAsDataURL(file);
+      });
+      
+      const base64 = await base64Promise;
+      let mimeType = file.type || 'image/jpeg';
+      
+      // 지원하지 않는 형식이면 기본값으로
+      if (!['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'].includes(mimeType)) {
+        mimeType = 'image/jpeg';
+      }
+
+      // API 호출 타임아웃 래퍼
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('서버 응답 시간이 초과되었습니다 (20초). 다시 시도해주세요.')), 20000)
+      );
+
+      // 안정적인 최신 모델 사용
+      const aiRequest = ai.models.generateContent({
+        model: "gemini-3.1-pro-preview",
         contents: [
           {
             parts: [
@@ -91,7 +116,7 @@ export default function App() {
               {
                 inlineData: {
                   data: base64,
-                  mimeType: file.type
+                  mimeType: mimeType
                 }
               }
             ]
@@ -121,14 +146,19 @@ export default function App() {
           }
         }
       });
+
+      const response = await Promise.race([aiRequest, timeoutPromise]) as any;
       
-      const responseText = response.text || '';
+      clearInterval(checkInterval);
+      
+      let responseText = response.text || "{}";
+      responseText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(responseText);
 
       setData({
-        date: parsed.date || '',
-        docNumber: parsed.docNumber || '',
-        customerCode: parsed.customerCode || '',
+        date: parsed.date || new Date().toISOString().split('T')[0],
+        docNumber: parsed.docNumber || '확인불가',
+        customerCode: parsed.customerCode || '확인불가',
         items: (parsed.items || []).map((item: any, idx: number) => ({
           id: `item-${idx}`,
           name: item.name || '알 수 없는 상품',
@@ -140,8 +170,13 @@ export default function App() {
       });
       setView('inspect');
     } catch (err) {
-      console.error(err);
-      setError("사진 분석에 실패했습니다. 다시 시도해 주세요.");
+      clearInterval(checkInterval);
+      console.error("OCR 분석 오류:", err);
+      let errMsg = "사진 분석에 실패했습니다. 사진을 다시 찍어주세요.";
+      if (err instanceof Error) {
+        errMsg = `오류: ${err.message}`;
+      }
+      setError(errMsg);
       setView('upload');
     }
   };
@@ -175,7 +210,7 @@ export default function App() {
   // --- 구글 시트 저장 ---
   const handleSave = async () => {
     if (!data) return;
-    if (SCRIPT_URL === '여기에_구글_스크립트_URL을_넣으세요') {
+    if (!SCRIPT_URL || SCRIPT_URL.includes('여기에')) {
       alert("구글 스크립트 URL이 설정되지 않았습니다. 코드 상단의 SCRIPT_URL을 수정해 주세요.");
       return;
     }
@@ -200,8 +235,8 @@ export default function App() {
 
       await fetch(SCRIPT_URL, {
         method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'application/json' },
+        mode: 'no-cors', // CORS preflight(OPTIONS) 방지
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // application/json 대신 text/plain 사용 (no-cors 제약)
         body: JSON.stringify(rows)
       });
 
@@ -238,22 +273,25 @@ export default function App() {
               exit={{ opacity: 0, y: -20 }}
               className="space-y-6 pt-10"
             >
+            <div className="space-y-4">
               <button 
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full h-64 bg-[#f26522] border-4 border-[#261813] rounded-2xl shadow-[8px_8px_0px_#261813] flex flex-col items-center justify-center gap-4 active:translate-y-1 active:shadow-[4px_4px_0px_#261813] transition-all hover:bg-[#d8541a] group"
+                className="w-full h-48 bg-[#f26522] border-4 border-[#261813] rounded-2xl shadow-[8px_8px_0px_#261813] flex flex-col items-center justify-center gap-2 active:translate-y-1 active:shadow-[4px_4px_0px_#261813] transition-all hover:bg-[#d8541a] group"
               >
-                <Camera size={96} className="text-white group-hover:scale-110 transition-transform" strokeWidth={2} />
-                <span className="text-4xl font-black text-white">사진 찍기</span>
+                <Camera size={80} className="text-white group-hover:scale-110 transition-transform" strokeWidth={2} />
+                <span className="text-3xl font-black text-white">사진 찍기</span>
               </button>
 
               <button 
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full h-64 bg-[#f26522] border-4 border-[#261813] rounded-2xl shadow-[8px_8px_0px_#261813] flex flex-col items-center justify-center gap-4 active:translate-y-1 active:shadow-[4px_4px_0px_#261813] transition-all hover:bg-[#d8541a] group"
+                className="w-full h-48 bg-[#f26522] border-4 border-[#261813] rounded-2xl shadow-[8px_8px_0px_#261813] flex flex-col items-center justify-center gap-2 active:translate-y-1 active:shadow-[4px_4px_0px_#261813] transition-all hover:bg-[#d8541a] group"
               >
-                <ImageIcon size={96} className="text-white group-hover:scale-110 transition-transform" strokeWidth={2} />
-                <span className="text-4xl font-black text-white">앨범에서 선택</span>
+                <ImageIcon size={80} className="text-white group-hover:scale-110 transition-transform" strokeWidth={2} />
+                <span className="text-3xl font-black text-white">앨범에서 선택</span>
               </button>
+            </div>
 
+            <div className="grid grid-cols-2 gap-4">
               <button 
                 onClick={async (e) => {
                   e.preventDefault();
@@ -273,11 +311,32 @@ export default function App() {
                     alert('샘플 파일을 찾을 수 없거나 다운로드할 수 없습니다.');
                   }
                 }}
-                className="w-full h-24 bg-white border-4 border-[#261813] rounded-2xl shadow-[8px_8px_0px_#261813] flex items-center justify-center gap-4 active:translate-y-1 active:shadow-[4px_4px_0px_#261813] transition-all hover:bg-orange-50 group"
+                className="w-full h-20 bg-white border-4 border-[#261813] rounded-2xl shadow-[8px_8px_0px_#261813] flex items-center justify-center gap-2 active:translate-y-1 active:shadow-[4px_4px_0px_#261813] transition-all hover:bg-orange-50 group"
               >
-                <Download size={40} className="text-[#261813] group-hover:scale-110 transition-transform" strokeWidth={2.5} />
-                <span className="text-3xl font-black text-[#261813]">샘플다운</span>
+                <Download size={32} className="text-[#261813] group-hover:scale-110 transition-transform" strokeWidth={2.5} />
+                <span className="text-xl font-black text-[#261813]">샘플다운</span>
               </button>
+
+              <button 
+                onClick={() => {
+                  // OCR 건너뛰고 테스트용 데이터 즉시 삽입 (시트 저장 테스트용)
+                  setData({
+                    date: new Date().toISOString().split('T')[0],
+                    docNumber: 'TEST-123456',
+                    customerCode: '코레일유통(테스트)',
+                    items: [
+                      { id: 't1', name: '테스트상품 A', code: '880111', originalQty: 10, currentQty: 10, unitPrice: 2000 },
+                      { id: 't2', name: '테스트상품 B', code: '880222', originalQty: 5, currentQty: 4, unitPrice: 1500 }
+                    ]
+                  });
+                  setView('inspect');
+                }}
+                className="w-full h-20 bg-green-100 border-4 border-[#261813] rounded-2xl shadow-[8px_8px_0px_#261813] flex items-center justify-center gap-2 active:translate-y-1 active:shadow-[4px_4px_0px_#261813] transition-all hover:bg-green-200 group"
+              >
+                <AlertCircle size={32} className="text-green-800" strokeWidth={2.5} />
+                <span className="text-xl font-black text-green-800">모의 테스트</span>
+              </button>
+            </div>
 
               <div className="p-8 bg-orange-50 border-2 border-[#261813] rounded-xl flex items-center gap-6">
                 <div className="bg-[#f26522] p-3 rounded-full">
@@ -302,7 +361,10 @@ export default function App() {
                 accept="image/*" 
                 onChange={(e) => {
                   const file = e.target.files?.[0];
-                  if (file) processImage(file);
+                  if (file) {
+                    processImage(file);
+                    e.target.value = ''; // 같은 이미지 재선택시에도 동작하도록
+                  }
                 }} 
               />
             </motion.div>
