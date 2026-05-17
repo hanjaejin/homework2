@@ -494,21 +494,22 @@ export default function App() {
 
       {/* --- 하단 네비게이션 --- */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t-4 border-[#261813] h-24 flex justify-around items-center px-4">
-        <button className="flex flex-col items-center gap-1 opacity-50">
-          <Home size={32} />
-          <span className="text-lg font-bold">홈</span>
+        <button 
+          className={`flex flex-col items-center gap-1 ${view === 'upload' ? 'text-[#f26522]' : 'opacity-50'}`}
+          onClick={() => {
+            setData(null);
+            setError(null);
+            setView('upload');
+          }}
+        >
+          <Home size={32} strokeWidth={view === 'upload' ? 3 : 2} />
+          <span className={`text-lg font-bold ${view === 'upload' ? 'font-black underline underline-offset-4' : ''}`}>홈</span>
         </button>
-        <button className="flex flex-col items-center gap-1 text-[#f26522]">
-          <ClipboardCheck size={32} strokeWidth={3} />
-          <span className="text-lg font-black underline underline-offset-4">입고검수</span>
-        </button>
-        <button className="flex flex-col items-center gap-1 opacity-50">
-          <Truck size={32} />
-          <span className="text-lg font-bold">반품출고</span>
-        </button>
-        <button className="flex flex-col items-center gap-1 opacity-50">
-          <Settings size={32} />
-          <span className="text-lg font-bold">설정</span>
+        <button 
+          className={`flex flex-col items-center gap-1 ${view !== 'upload' ? 'text-[#f26522]' : 'opacity-50'}`}
+        >
+          <ClipboardCheck size={32} strokeWidth={view !== 'upload' ? 3 : 2} />
+          <span className={`text-lg font-bold ${view !== 'upload' ? 'font-black underline underline-offset-4' : ''}`}>입고검수</span>
         </button>
       </nav>
     </div>
