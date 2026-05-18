@@ -91,20 +91,54 @@ export default function App() {
 
       const base64Promise = new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = () => resolve((reader.result as string).split(',')[1]);
-        reader.onerror = () => reject(new Error("파일을 읽을 수 없습니다."));
         reader.readAsDataURL(file);
+        reader.onload = (event) => {
+          const img = new Image();
+          img.src = event.target?.result as string;
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const MAX_WIDTH = 1200; // 최대 가로 픽셀 제한
+            const MAX_HEIGHT = 1200; // 최대 세로 픽셀 제한
+            let width = img.width;
+            let height = img.height;
+
+            // 비율을 유지하면서 크기 조정
+            if (width > height) {
+              if (width > MAX_WIDTH) {
+                height *= MAX_WIDTH / width;
+                width = MAX_WIDTH;
+              }
+            } else {
+              if (height > MAX_HEIGHT) {
+                width *= MAX_HEIGHT / height;
+                height = MAX_HEIGHT;
+              }
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx?.drawImage(img, 0, 0, width, height);
+            
+            // image/jpeg 포맷으로 80% 품질 압축 (용량 대폭 감소)
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+            // 'data:image/jpeg;base64,' 이후의 순수 base64 문자열만 추출
+            resolve(dataUrl.split(',')[1]);
+          };
+          img.onerror = () => reject(new Error("이미지를 브라우저에서 로드할 수 없습니다."));
+        };
+        reader.onerror = () => reject(new Error("파일을 읽을 수 없습니다."));
       });
       
       const base64 = await base64Promise;
-      let mimeType = file.type || 'image/jpeg';
+      const mimeType = 'image/jpeg';
       
       if (!['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'].includes(mimeType)) {
         mimeType = 'image/jpeg';
       }
 
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('서버 응답 시간이 초과되었습니다 (20초). 다시 시도해주세요.')), 20000)
+        setTimeout(() => reject(new Error('서버 응답 시간이 초과되었습니다 (60초). 네트워크 상태를 확인해주세요.')), 60000)
       );
 
       // ✅ 404 에러 방지를 위한 최신 모델명 적용
