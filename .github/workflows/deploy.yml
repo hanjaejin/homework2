@@ -1,29 +1,30 @@
-name: Deploy to GitHub Pages
+name: Deploy Vite Site
 on:
   push:
-    branches: [ main ] # main 브랜치에 푸시될 때 실행
+    branches: [ main ] # main 브랜치에 코드가 올라오면 실행
 permissions:
   contents: read
   pages: write
   id-token: write
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - setup-node:
-          node-version: 20
-      - run: npm install
-      - run: npm run build
-      - uses: actions/upload-pages-artifact@v3
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
-          path: './dist'
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
+          node-version: 20
+          cache: 'npm'
+      - name: Install and Build
+        run: |
+          npm install
+          npm run build
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './dist' # 빌드된 결과물 폴더
+      - name: Deploy to GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@v4
