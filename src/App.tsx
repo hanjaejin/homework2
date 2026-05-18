@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Camera, 
@@ -25,12 +25,9 @@ import {
 import { GoogleGenAI, Type } from "@google/genai";
 
 // ==========================================
-// 1. 구글 시트 웹 앱 URL (사용자가 여기에 주소 입력)
+// 1. 구글 시트 웹 앱 URL
 // ==========================================
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxlJNMIxU7uhiLUZ7siXiWmImBNKZdwCt4fZmWk9viDaosMg1Bhhk06xWXa5r35MYI7/exec';
-
-// Gemini API 설정 (Vite/React 패턴)
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 interface InspectionItem {
   id: string;
@@ -56,10 +53,26 @@ export default function App() {
   const [loadingMsg, setLoadingMsg] = useState('사진을 분석하고 있습니다...');
   const [error, setError] = useState<string | null>(null);
   
+  // ✅ 추가: API 키 상태 관리 (localStorage 연동)
+  const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem('GEMINI_API_KEY') || '');
+  const [showSettings, setShowSettings] = useState<boolean>(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // API 키가 변경될 때마다 브라우저 로컬 스토리지에 자동 저장
+  useEffect(() => {
+    localStorage.setItem('GEMINI_API_KEY', apiKey);
+  }, [apiKey]);
 
   // --- 이미지 OCR 처리 (Gemini) ---
   const processImage = async (file: File) => {
+    // ✅ API 키 누락 방어 로직
+    if (!apiKey) {
+      alert('설정(톱니바퀴) 메뉴에서 Gemini API Key를 먼저 입력해주세요.');
+      setShowSettings(true);
+      return;
+    }
+
     setView('processing');
     setError(null);
     setLoadingMsg('사진을 분석하고 있습니다...');
@@ -73,7 +86,9 @@ export default function App() {
     }, 4000);
 
     try {
-      // FileReader를 통해 Base64 변환 시도 (캔버스 변환 생략으로 가장 안전한 방법)
+      // ✅ 입력된 API 키로 동적 객체 생성
+      const ai = new GoogleGenAI({ apiKey: apiKey });
+
       const base64Promise = new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve((reader.result as string).split(',')[1]);
@@ -84,19 +99,17 @@ export default function App() {
       const base64 = await base64Promise;
       let mimeType = file.type || 'image/jpeg';
       
-      // 지원하지 않는 형식이면 기본값으로
       if (!['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'].includes(mimeType)) {
         mimeType = 'image/jpeg';
       }
 
-      // API 호출 타임아웃 래퍼
       const timeoutPromise = new Promise((_, reject) => 
         setTimeout(() => reject(new Error('서버 응답 시간이 초과되었습니다 (20초). 다시 시도해주세요.')), 20000)
       );
 
-      // 안정적인 최신 모델 사용
+      // ✅ 404 에러 방지를 위한 최신 모델명 적용
       const aiRequest = ai.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-1.5-flash-latest",
         contents: [
           {
             parts: [
@@ -235,8 +248,8 @@ export default function App() {
 
       await fetch(SCRIPT_URL, {
         method: 'POST',
-        mode: 'no-cors', // CORS preflight(OPTIONS) 방지
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // application/json 대신 text/plain 사용 (no-cors 제약)
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(rows)
       });
 
@@ -253,7 +266,10 @@ export default function App() {
       {/* --- 헤더 --- */}
       <header className="sticky top-0 z-50 bg-[#fff8f6] border-b-4 border-[#261813] px-4 py-4 flex justify-between items-center">
         <div className="flex items-center gap-4">
-          <button className="p-2 hover:bg-orange-100 rounded-full transition-colors active:scale-95">
+          <button 
+            onClick={() => setShowSettings(true)}
+            className="p-2 hover:bg-orange-100 rounded-full transition-colors active:scale-95"
+          >
             <Settings size={32} strokeWidth={2.5} className="text-[#a63b00]" />
           </button>
           <h1 className="text-3xl font-black text-[#a63b00]">검수 목록</h1>
@@ -319,7 +335,6 @@ export default function App() {
 
               <button 
                 onClick={() => {
-                  // OCR 건너뛰고 테스트용 데이터 즉시 삽입 (시트 저장 테스트용)
                   setData({
                     date: new Date().toISOString().split('T')[0],
                     docNumber: 'TEST-123456',
@@ -363,7 +378,7 @@ export default function App() {
                   const file = e.target.files?.[0];
                   if (file) {
                     processImage(file);
-                    e.target.value = ''; // 같은 이미지 재선택시에도 동작하도록
+                    e.target.value = ''; 
                   }
                 }} 
               />
@@ -491,6 +506,43 @@ export default function App() {
           )}
         </AnimatePresence>
       </main>
+
+      {/* --- 설정 모달 창 --- */}
+      <AnimatePresence>
+        {showSettings && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-4"
+          >
+            <div className="bg-white rounded-2xl p-6 w-full max-w-sm border-4 border-[#261813] shadow-[8px_8px_0px_#261813]">
+              <h2 className="text-2xl font-black mb-4 text-[#a63b00]">설정</h2>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Google Gemini API Key</label>
+                  <input 
+                    type="password" 
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder="AI Studio에서 발급받은 키 입력"
+                    className="w-full border-2 border-[#261813] rounded-lg p-3 text-lg focus:outline-none focus:ring-4 focus:ring-orange-200"
+                  />
+                  <p className="text-xs text-gray-500 mt-2">
+                    * 데모 시연용입니다. 입력하신 키는 서버에 전송되지 않고 현재 기기에만 보관됩니다.
+                  </p>
+                </div>
+                <button 
+                  onClick={() => setShowSettings(false)}
+                  className="w-full py-3 bg-[#f26522] text-white font-black rounded-lg border-2 border-[#261813] active:bg-[#d8541a]"
+                >
+                  저장 및 닫기
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* --- 하단 네비게이션 --- */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t-4 border-[#261813] h-24 flex justify-around items-center px-4">
