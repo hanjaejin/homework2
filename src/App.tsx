@@ -96,7 +96,7 @@ export default function App() {
 
       // 안정적인 최신 모델 사용
       const aiRequest = ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
+        model: "gemini-1.5-flash",
         contents: [
           {
             parts: [
@@ -296,7 +296,7 @@ export default function App() {
                 onClick={async (e) => {
                   e.preventDefault();
                   try {
-                    const response = await fetch('/sample.jpg');
+                    const response = await fetch(`${import.meta.env.BASE_URL}sample.jpg`);
                     if (!response.ok) throw new Error('File not found');
                     const blob = await response.blob();
                     const url = window.URL.createObjectURL(blob);
