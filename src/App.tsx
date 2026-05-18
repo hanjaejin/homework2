@@ -95,7 +95,10 @@ export default function App() {
       );
 
       // 안정적인 최신 모델 사용
-      const aiRequest = ai.getGenerativeModel({ model: "gemini-1.5-flash" }).generateContent({
+      const model = genAI.getGenerativeModel({ 
+        model: "gemini-1.5-flash" // 할당량이 넉넉하고 속도가 빠른 모델로 고정
+      });
+      const aiRequest = ai.generateContent({
         contents: [
           {
             parts: [
